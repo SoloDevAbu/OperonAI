@@ -91,6 +91,12 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/db:
+    devDependencies:
+      '@operonai/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+
   packages/eslint-config:
     devDependencies:
       '@eslint/js':
@@ -132,6 +138,24 @@ importers:
       typescript-eslint:
         specifier: ^8.54.0
         version: 8.55.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
+
+  packages/logger:
+    devDependencies:
+      '@operonai/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+
+  packages/queue:
+    devDependencies:
+      '@operonai/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+
+  packages/types:
+    devDependencies:
+      '@operonai/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
 
   packages/typescript-config: {}
 
