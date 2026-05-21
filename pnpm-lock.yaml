@@ -174,12 +174,6 @@ importers:
         specifier: workspace:*
         version: link:../typescript-config
 
-  packages/logger:
-    devDependencies:
-      '@operonai/typescript-config':
-        specifier: workspace:*
-        version: link:../typescript-config
-
   packages/queue:
     dependencies:
       bullmq:
@@ -189,6 +183,9 @@ importers:
         specifier: ^5.10.1
         version: 5.10.1
     devDependencies:
+      '@operonai/types':
+        specifier: workspace:*
+        version: link:../types
       '@operonai/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config

@@ -1,8 +1,4 @@
-import type { IncidentSeverity } from "@ops/shared-types";
-
-// ─── Investigation job ────────────────────────────────────────────────────────
-// Enqueued by: api-service (on anomaly confirmed)
-// Consumed by: agent-service
+import type { IncidentSeverity } from "@operonai/types";
 
 export interface InvestigationJobData {
   incidentId: string;
