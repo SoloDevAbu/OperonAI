@@ -1,5 +1,5 @@
 {
-    "extends": "@operonai/typescript-config/base.json",
+    "extends": "@operonai//typescript-config/base.json",
     "compilerOptions": {
       "baseUrl": ".",
       "outDir": "dist",
