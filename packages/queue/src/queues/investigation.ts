@@ -1,6 +1,10 @@
 import { Queue, Worker, QueueEvents, type Processor } from "bullmq"
 import type { ConnectionOptions } from "bullmq"
-import type { InvestigationJobData, InvestigationJobResult } from "../jobs/types"
+import type IOredis from "ioredis"
+import type {
+  InvestigationJobData,
+  InvestigationJobResult,
+} from "../jobs/types"
 
 export const INVESTIGATION_QUEUE_NAME = "investigation"
 
@@ -19,7 +23,7 @@ export const defaultJobOptions = {
   },
 }
 
-export const createInvestigationQueue = (connection: ConnectionOptions) => {
+export const createInvestigationQueue = (connection: IOredis) => {
   return new Queue<InvestigationJobData, InvestigationJobResult>(
     INVESTIGATION_QUEUE_NAME,
     {
@@ -30,7 +34,7 @@ export const createInvestigationQueue = (connection: ConnectionOptions) => {
 }
 
 export const createInvestigationWorker = (
-  connection: ConnectionOptions,
+  connection: IOredis,
   processor: Processor<InvestigationJobData, InvestigationJobResult>
 ) => {
   return new Worker<InvestigationJobData, InvestigationJobResult>(
@@ -44,8 +48,10 @@ export const createInvestigationWorker = (
   )
 }
 
-export const createInvestigationQueueEvents = (connection: ConnectionOptions) => {
-    return new QueueEvents(INVESTIGATION_QUEUE_NAME, {
-        connection,
-    })
+export const createInvestigationQueueEvents = (
+  connection: ConnectionOptions
+) => {
+  return new QueueEvents(INVESTIGATION_QUEUE_NAME, {
+    connection,
+  })
 }
