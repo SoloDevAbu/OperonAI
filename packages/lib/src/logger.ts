@@ -17,7 +17,7 @@ export const createLogger = (options: LoggerOptions) => {
 
   const transport = usePretty
     ? {
-        target: "pinno-pretty",
+        target: "pino-pretty",
         options: {
           colorize: true,
           translationTime: "HH:MM:ss",
@@ -46,11 +46,11 @@ export const createLogger = (options: LoggerOptions) => {
       ],
       censor: "[]",
     },
-  });
+  })
 
-  return logger;
+  return logger
 }
 
-export type Logger = ReturnType<typeof createLogger>;
+export type Logger = ReturnType<typeof createLogger>
 
-export { pino };
+export { pino }
