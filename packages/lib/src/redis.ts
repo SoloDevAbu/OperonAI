@@ -94,3 +94,5 @@ export const createBullMQRedisClient = (): IORedis => {
 
   return client
 }
+
+export type { IORedis }
