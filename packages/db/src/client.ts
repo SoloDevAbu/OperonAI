@@ -8,16 +8,6 @@ if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is not set")
 }
 
-const db = drizzleNode({
-  client: new Pool({
-    connectionString: DATABASE_URL,
-    max: 50,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-  }),
-  schema,
-})
-
 export const createDb = () => {
   const pool = new Pool({
     connectionString: DATABASE_URL,
@@ -44,5 +34,7 @@ export const closeDb = async (pool: Pool) => {
   await pool.end()
 }
 
-export { db }
+export type Database = ReturnType<typeof createDb>["db"]
 export * from "./schema"
+
+export { sql } from "drizzle-orm"
