@@ -3,6 +3,7 @@ import type {
   RawEvent,
   NormalizedEventType,
 } from "@operonai/types"
+import { config } from "../config"
 
 const levelToEventType = (
   level: IngestLogPayload["level"]
@@ -34,6 +35,6 @@ export const normalizeAppLog = (
   metadata: {
     service: payload.service,
     host: payload.host,
-    environment: process.env.NODE_ENV ?? "production",
+    environment: config.nodeEnv,
   },
 })

@@ -2,16 +2,17 @@ import type {
   IngestEventPayload,
   RawEvent,
   NormalizedEventType,
-} from "@operonai/types"
+} from "@operonai/types";
+import { config } from "../config";
 
 const resolvePostgresEventType = (type: string): NormalizedEventType => {
-  if (type.includes("slow_query")) return "postgres.slow_query"
+  if (type.includes("slow_query")) return "postgres.slow_query";
   if (type.includes("connection_pool"))
-    return "postgres.connection_pool_exhausted"
-  if (type.includes("deadlock")) return "postgres.deadlock"
+    return "postgres.connection_pool_exhausted";
+  if (type.includes("deadlock")) return "postgres.deadlock";
 
-  return "postgres.slow_query"
-}
+  return "postgres.slow_query";
+};
 
 export const normalizePostgresEvent = (
   orgId: string,
@@ -27,6 +28,6 @@ export const normalizePostgresEvent = (
   },
   metadata: {
     ...(payload.metadata ?? {}),
-    environment: process.env.NODE_ENV ?? "production",
+    environment: config.nodeEnv,
   },
-})
+});
