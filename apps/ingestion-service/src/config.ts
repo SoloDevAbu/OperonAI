@@ -1,12 +1,12 @@
 const requireEnv = (key: string): string => {
-  const val = process.env[key]
-  if (!val) throw new Error(`Missing required env var: ${key}`)
-  return val
-}
+  const val = process.env[key];
+  if (!val) throw new Error(`Missing required env var: ${key}`);
+  return val;
+};
 
 export const config = {
   port: Number(process.env.INGESTION_PORT ?? 3001),
-  nodeEnv: process.env.NODE_ENV ?? "production",
+  nodeEnv: process.env.NODE_ENV ?? "development",
 
   buffer: {
     maxSize: Number(process.env.INGESTION_BUFFER_MAX_SIZE ?? 100),
@@ -31,4 +31,4 @@ export const config = {
     bullmqIntervalMs: 15_000,
     queues: ["investigations", "notifications", "emails"],
   },
-} as const
+} as const;
