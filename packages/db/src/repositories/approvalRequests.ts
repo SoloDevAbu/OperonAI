@@ -66,5 +66,8 @@ export const createApprovalRequest = async (
     .insert(approvalRequests)
     .values(data)
     .returning()
+  if (!approval) {
+    throw new Error("Failed to create approval request")
+  }
   return approval
 }

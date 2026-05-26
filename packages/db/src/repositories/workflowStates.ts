@@ -23,5 +23,8 @@ export const createWorkflowState = async (
     .insert(workflowStates)
     .values(data)
     .returning()
+  if (!workflowState) {
+    throw new Error("Failed to create workflow state")
+  }
   return workflowState
 }

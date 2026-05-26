@@ -65,6 +65,9 @@ export const createIncident = async (db: Database, data: NewIncidentRow) => {
     .insert(incidents)
     .values(data)
     .returning()
+  if (!incident) {
+    throw new Error("Failed to create incident")
+  }
   return incident
 }
 

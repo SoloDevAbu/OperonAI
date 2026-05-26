@@ -62,6 +62,9 @@ export const createRunbook = async (
       createdAt: runbooks.createdAt,
       updatedAt: runbooks.updatedAt,
     })
+  if (!runbook) {
+    throw new Error("Failed to create runbook")
+  }
   return runbook
 }
 
