@@ -34,10 +34,44 @@ importers:
         version: link:../../packages/typescript-config
 
   apps/api-service:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^2.0.4
+        version: 2.0.4(hono@4.12.23)
+      '@hono/zod-validator':
+        specifier: ^0.8.0
+        version: 0.8.0(hono@4.12.23)(zod@3.25.76)
+      '@operonai/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@operonai/lib':
+        specifier: workspace:*
+        version: link:../../packages/lib
+      '@operonai/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
+      '@operonai/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      hono:
+        specifier: ^4.12.23
+        version: 4.12.23
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@operonai/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
+      '@types/node':
+        specifier: ^25.1.0
+        version: 25.2.3
+      tsx:
+        specifier: ^4.22.3
+        version: 4.22.3
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   apps/ingestion-service:
     dependencies:
@@ -1150,6 +1184,18 @@ packages:
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
+
+  '@hono/node-server@2.0.4':
+    resolution: {integrity: sha512-Ut3y0dMMPWy6bZ2kVfx25EOVbZlm15dhF4mOsezMlhpNHy+4MkU1qN9Y6lnruYi4wPmFzimGX2X7LF/FwHli4A==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      hono: ^4
+
+  '@hono/zod-validator@0.8.0':
+    resolution: {integrity: sha512-5uS4S1/LKtZQYvD4BtpPUFkOv8d1wNxHHrChm26buMiEYc1FrHWvDUaKVBwkiVtvSExHSpLGDvcnpI2Copyj9w==}
+    peerDependencies:
+      hono: '>=4.10.0'
+      zod: ^3.25.0 || ^4.0.0
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -3846,6 +3892,10 @@ packages:
     resolution: {integrity: sha512-xa3eYXYXx68XTT4hZ7dRzsXBhaq85ToSrlUJNoR0gwz/1Ap/CNwX47wfvV7pc/xWhjKVVkLT7zBJy8chhNguqQ==}
     engines: {node: '>=16.9.0'}
 
+  hono@4.12.23:
+    resolution: {integrity: sha512-eIaZ9qDgu7XV0pxOCrg7/WhnQ6Ivm22UcxhXx/A3dcbqbbYgBEkc6e/J/s7j2tS96zoB0S9VBdLwQNCWwUo4LA==}
+    engines: {node: '>=16.9.0'}
+
   http-errors@2.0.1:
     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
     engines: {node: '>= 0.8'}
@@ -6402,6 +6452,15 @@ snapshots:
   '@hono/node-server@1.19.14(hono@4.12.19)':
     dependencies:
       hono: 4.12.19
+
+  '@hono/node-server@2.0.4(hono@4.12.23)':
+    dependencies:
+      hono: 4.12.23
+
+  '@hono/zod-validator@0.8.0(hono@4.12.23)(zod@3.25.76)':
+    dependencies:
+      hono: 4.12.23
+      zod: 3.25.76
 
   '@humanfs/core@0.19.1': {}
 
@@ -9260,6 +9319,8 @@ snapshots:
       hermes-estree: 0.25.1
 
   hono@4.12.19: {}
+
+  hono@4.12.23: {}
 
   http-errors@2.0.1:
     dependencies:
