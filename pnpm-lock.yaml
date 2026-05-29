@@ -53,6 +53,9 @@ importers:
       '@operonai/types':
         specifier: workspace:*
         version: link:../../packages/types
+      bcryptjs:
+        specifier: ^3.0.3
+        version: 3.0.3
       hono:
         specifier: ^4.12.23
         version: 4.12.23
