@@ -1,50 +1,53 @@
 import type { Context, Next } from "hono";
+import { createRedisClient, HEADER_REAL_IP } from "@operonai/lib";
+import type { Logger } from "@operonai/lib";
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
-
-const store = new Map<string, RateLimitEntry>();
-
-const cleanup = (): void => {
-  const now = Date.now();
-
-  for (const [key, entry] of store.entries()) {
-    if (entry.resetAt < now) {
-      store.delete(key);
-    }
-  }
-};
-
-setInterval(cleanup, 60_000).unref();
+const redis = createRedisClient();
 
 export const rateLimitMiddleware =
   (limit: number, windowMs: number) =>
   async (c: Context, next: Next): Promise<void | Response> => {
+    const logger = c.get("logger") as Logger | undefined;
     const orgId = c.get("orgId") as string | undefined;
-    const ip = c.req.header("x-real-ip") ?? "unknown";
-    const key = `${orgId ?? ip}:${c.req.path}`;
-    const now = Date.now();
+    const ip = c.req.header(HEADER_REAL_IP) ?? "unknown";
 
-    const entry = store.get(key);
+    // Identifier per organization or IP if not authenticated yet
+    const identifier = orgId ?? ip;
+    const key = `ratelimit:${identifier}:${c.req.path}`;
 
-    if (!entry || entry.resetAt < now) {
-      store.set(key, { count: 1, resetAt: now + windowMs });
+    try {
+      const multi = redis.multi();
+      multi.incr(key);
+
+      const results = await multi.exec();
+      const count = results?.[0]?.[1] as number;
+
+      if (count === 1) {
+        // First request in window, set expiration
+        await redis.pexpire(key, windowMs);
+      }
+
+      if (count > limit) {
+        logger?.warn(
+          { path: c.req.path, identifier, count },
+          "rate limit exceeded"
+        );
+        const pttl = await redis.pttl(key);
+        const retryAfter = Math.max(1, Math.ceil(pttl / 1000));
+
+        return c.json(
+          {
+            error: "Rate limit exceeded",
+            retryAfter,
+          },
+          429
+        );
+      }
+
       await next();
-      return;
+    } catch (err) {
+      // Fallback: if Redis fails, log it and allow request to prevent full outage
+      logger?.error({ err }, "Redis error during rate limiting, failing open");
+      await next();
     }
-
-    if (entry.count >= limit) {
-      return c.json(
-        {
-          error: "Rate limit exceeded",
-          retryAfter: Math.ceil((entry.resetAt - now) / 1000),
-        },
-        429
-      );
-    }
-
-    entry.count++;
-    await next();
   };
