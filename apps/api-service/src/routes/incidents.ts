@@ -9,8 +9,9 @@ import {
   findStepsByIncidentId,
   findWorkflowStatesByIncidentId,
 } from "@operonai/db";
+import type { Logger } from "@operonai/lib";
 
-export const incidentsRouter = new Hono<{ Variables: { orgId: string } }>();
+export const incidentsRouter = new Hono<{ Variables: { orgId: string; logger: Logger } }>();
 
 const listQuerySchema = z.object({
   status: z.string().optional(),
@@ -35,23 +36,31 @@ incidentsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
 });
 
 incidentsRouter.get("/:id", async (c) => {
+  const logger = c.get("logger") as Logger | undefined;
   const orgId = c.get("orgId") as string;
   const id = c.req.param("id");
 
   const incident = await findIncidentById(db, id, orgId);
 
-  if (!incident) return c.json({ error: "Incident not found" }, 404);
+  if (!incident) {
+    logger?.warn({ incidentId: id, orgId }, "incident not found");
+    return c.json({ error: "Incident not found" }, 404);
+  }
 
   return c.json({ incident });
 });
 
 incidentsRouter.get("/:id/steps", async (c) => {
+  const logger = c.get("logger") as Logger | undefined;
   const orgId = c.get("orgId") as string;
   const id = c.req.param("id");
 
   const incident = await findIncidentIdOnly(db, id, orgId);
 
-  if (!incident) return c.json({ error: "Incident not found" }, 404);
+  if (!incident) {
+    logger?.warn({ incidentId: id, orgId }, "incident not found for steps request");
+    return c.json({ error: "Incident not found" }, 404);
+  }
 
   const steps = await findStepsByIncidentId(db, id);
 
@@ -59,12 +68,16 @@ incidentsRouter.get("/:id/steps", async (c) => {
 });
 
 incidentsRouter.get("/:id/timeline", async (c) => {
+  const logger = c.get("logger") as Logger | undefined;
   const orgId = c.get("orgId") as string;
   const id = c.req.param("id");
 
   const incident = await findIncidentIdOnly(db, id, orgId);
 
-  if (!incident) return c.json({ error: "Incident not found" }, 404);
+  if (!incident) {
+    logger?.warn({ incidentId: id, orgId }, "incident not found for timeline request");
+    return c.json({ error: "Incident not found" }, 404);
+  }
 
   const timeline = await findWorkflowStatesByIncidentId(db, id);
 

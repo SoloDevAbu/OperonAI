@@ -10,15 +10,20 @@ import {
 } from "@operonai/db";
 import { investigationQueue } from "../lib/queue";
 import { publish } from "../lib/sse";
-import { createLogger } from "@operonai/lib";
+import type { Logger } from "@operonai/lib";
+import {
+  JOB_PREFIX_INCIDENT,
+  SSE_CHANNEL_INCIDENTS,
+  SSE_CHANNEL_APPROVALS,
+  INCIDENT_STATUS,
+  APPROVAL_STATUS,
+} from "@operonai/lib";
 import type { InvestigationJobData } from "@operonai/queue";
-
-const logger = createLogger({ service: "api-service:internal" });
 
 // Internal routes — only called by other services via X-Internal-Secret header
 // These are NOT exposed publicly through nginx
 
-export const internalRouter = new Hono<{ Variables: { orgId: string } }>();
+export const internalRouter = new Hono<{ Variables: { orgId: string; logger: Logger } }>();
 
 // Called by anomaly-service when it detects an anomaly.
 // Creates the incident, records the initial workflow state, enqueues the job.
@@ -37,11 +42,12 @@ internalRouter.post(
   "/internal/incidents",
   zValidator("json", createIncidentSchema),
   async (c) => {
+    const logger = c.get("logger") as Logger | undefined;
     const body = c.req.valid("json");
 
     const incident = await createIncident(db, {
       orgId: body.orgId,
-      status: "detected",
+      status: INCIDENT_STATUS.DETECTED,
       severity: body.severity,
       title: body.title,
       affectedServices: body.affectedServices,
@@ -53,7 +59,7 @@ internalRouter.post(
     await createWorkflowState(db, {
       orgId: body.orgId,
       incidentId: incident.id,
-      currentState: "detected",
+      currentState: INCIDENT_STATUS.DETECTED,
       previousState: null,
       stateData: { anomalyScore: body.score },
     });
@@ -65,34 +71,40 @@ internalRouter.post(
       severity: body.severity,
     };
 
-    await investigationQueue.add("investigate", jobData, {
-      // Use incident ID as job ID so we can look it up later for approval resume
-      jobId: `incident-${incident.id}`,
-      priority:
-        body.severity === "critical" ? 1 : body.severity === "high" ? 2 : 3,
-    });
+    const jobId = `${JOB_PREFIX_INCIDENT}${incident.id}`;
+
+    try {
+      await investigationQueue.add("investigate", jobData, {
+        jobId,
+        priority:
+          body.severity === "critical" ? 1 : body.severity === "high" ? 2 : 3,
+      });
+    } catch (err) {
+      logger?.error({ err, incidentId: incident.id }, "failed to enqueue investigation job");
+      return c.json({ error: "Failed to enqueue investigation job" }, 500);
+    }
 
     // Update status to queued
-    await updateIncidentStatus(db, incident.id, "queued");
+    await updateIncidentStatus(db, incident.id, INCIDENT_STATUS.QUEUED);
 
     await createWorkflowState(db, {
       orgId: body.orgId,
       incidentId: incident.id,
-      currentState: "queued",
-      previousState: "detected",
-      stateData: { jobId: `incident-${incident.id}` },
+      currentState: INCIDENT_STATUS.QUEUED,
+      previousState: INCIDENT_STATUS.DETECTED,
+      stateData: { jobId },
     });
 
     // SSE — notify dashboard
-    publish(`incidents:${body.orgId}`, "incident_created", {
+    publish(`${SSE_CHANNEL_INCIDENTS}:${body.orgId}`, "incident_created", {
       id: incident.id,
       title: incident.title,
       severity: incident.severity,
       status: incident.status,
       detectedAt: incident.detectedAt,
-    });
+    }, logger);
 
-    logger.info(
+    logger?.info(
       { incidentId: incident.id, orgId: body.orgId, severity: body.severity },
       "incident created and queued"
     );
@@ -105,9 +117,10 @@ internalRouter.post(
 // Fallback path — normally the approval route handles job promotion directly.
 
 internalRouter.post("/internal/incidents/:id/resume", async (c) => {
+  const logger = c.get("logger") as Logger | undefined;
   const id = c.req.param("id");
 
-  const jobId = `incident-${id}`;
+  const jobId = `${JOB_PREFIX_INCIDENT}${id}`;
   const job = await investigationQueue.getJob(jobId);
 
   if (!job) {
@@ -118,7 +131,7 @@ internalRouter.post("/internal/incidents/:id/resume", async (c) => {
     await job.promote();
     return c.json({ success: true });
   } catch (err) {
-    logger.error({ err, jobId }, "failed to promote job on resume");
+    logger?.error({ err, jobId }, "failed to promote job on resume");
     return c.json({ error: "Failed to promote job" }, 500);
   }
 });
@@ -145,6 +158,7 @@ internalRouter.post(
   "/internal/approvals",
   zValidator("json", createApprovalSchema),
   async (c) => {
+    const logger = c.get("logger") as Logger | undefined;
     const body = c.req.valid("json");
 
     const expiresAt = new Date(Date.now() + body.timeoutMs);
@@ -155,30 +169,30 @@ internalRouter.post(
       actionType: body.actionType,
       actionDescription: body.actionDescription,
       actionPayload: body.actionPayload,
-      status: "pending",
+      status: APPROVAL_STATUS.PENDING,
       expiresAt,
     });
 
-    await updateIncidentStatus(db, body.incidentId, "awaiting_approval");
+    await updateIncidentStatus(db, body.incidentId, INCIDENT_STATUS.AWAITING_APPROVAL);
 
     await createWorkflowState(db, {
       orgId: body.orgId,
       incidentId: body.incidentId,
-      currentState: "awaiting_approval",
-      previousState: "investigating",
+      currentState: INCIDENT_STATUS.AWAITING_APPROVAL,
+      previousState: INCIDENT_STATUS.INVESTIGATING,
       stateData: { approvalId: approval.id, actionType: body.actionType },
     });
 
     // Notify dashboard — new approval pending
-    publish(`approvals:${body.orgId}`, "approval_requested", {
+    publish(`${SSE_CHANNEL_APPROVALS}:${body.orgId}`, "approval_requested", {
       approvalId: approval.id,
       incidentId: body.incidentId,
       actionType: body.actionType,
       actionDescription: body.actionDescription,
       expiresAt: expiresAt.toISOString(),
-    });
+    }, logger);
 
-    logger.info(
+    logger?.info(
       {
         approvalId: approval.id,
         incidentId: body.incidentId,

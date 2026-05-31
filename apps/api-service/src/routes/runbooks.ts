@@ -8,8 +8,9 @@ import {
   createRunbook,
   deleteRunbook,
 } from "@operonai/db";
+import type { Logger } from "@operonai/lib";
 
-export const runbooksRouter = new Hono<{ Variables: { orgId: string } }>();
+export const runbooksRouter = new Hono<{ Variables: { orgId: string; logger: Logger } }>();
 
 runbooksRouter.get("/", async (c) => {
   const orgId = c.get("orgId") as string;
@@ -20,12 +21,16 @@ runbooksRouter.get("/", async (c) => {
 });
 
 runbooksRouter.get("/:id", async (c) => {
+  const logger = c.get("logger") as Logger | undefined;
   const orgId = c.get("orgId") as string;
   const id = c.req.param("id");
 
   const runbook = await findRunbookById(db, id, orgId);
 
-  if (!runbook) return c.json({ error: "Runbook not found" }, 404);
+  if (!runbook) {
+    logger?.warn({ runbookId: id, orgId }, "runbook not found on fetch");
+    return c.json({ error: "Runbook not found" }, 404);
+  }
 
   return c.json({ runbook });
 });
@@ -58,16 +63,24 @@ runbooksRouter.post("/", zValidator("json", createRunbookSchema), async (c) => {
     embedding: zeroEmbedding,
   });
 
+  const logger = c.get("logger") as Logger | undefined;
+  logger?.info({ runbookId: runbook.id, orgId }, "runbook created");
+
   return c.json({ runbook }, 201);
 });
 
 runbooksRouter.delete("/:id", async (c) => {
+  const logger = c.get("logger") as Logger | undefined;
   const orgId = c.get("orgId") as string;
   const id = c.req.param("id");
 
   const deleted = await deleteRunbook(db, id, orgId);
 
-  if (!deleted) return c.json({ error: "Runbook not found" }, 404);
+  if (!deleted) {
+    logger?.warn({ runbookId: id, orgId }, "runbook not found on delete");
+    return c.json({ error: "Runbook not found" }, 404);
+  }
 
+  logger?.info({ runbookId: id, orgId }, "runbook deleted");
   return c.json({ success: true, id: deleted.id });
 });

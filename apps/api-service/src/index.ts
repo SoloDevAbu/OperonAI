@@ -1,6 +1,13 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { createLogger } from "@operonai/lib";
+import { cors } from "hono/cors";
+import {
+  createLogger,
+  HEADER_AUTHORIZATION,
+  HEADER_INTERNAL_SECRET,
+  HEADER_ORG_ID,
+  type Logger,
+} from "@operonai/lib";
 import { closeDb, pool } from "./lib/db";
 import { closeQueue } from "./lib/queue";
 import { authMiddleware } from "./middleware/auth";
@@ -10,10 +17,48 @@ import { approvalsRouter } from "./routes/approvals";
 import { runbooksRouter } from "./routes/runbooks";
 import { streamRouter } from "./routes/stream";
 import { internalRouter } from "./routes/internals";
+import { organizationsRouter } from "./routes/organizations";
 
 const logger = createLogger({ service: "api-service" });
 
-const app = new Hono();
+const app = new Hono<{ Variables: { logger: Logger; orgId?: string; isInternal?: boolean; organization?: any } }>();
+
+app.use(
+  "/*",
+  cors({
+    origin: (origin) => {
+      if (!origin) return "http://localhost:3000";
+      if (origin.startsWith("http://localhost:3000") || origin.includes("localhost:3000")) {
+        return origin;
+      }
+      return "http://localhost:3000";
+    },
+    allowHeaders: ["Content-Type", HEADER_AUTHORIZATION, HEADER_ORG_ID, HEADER_INTERNAL_SECRET],
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    exposeHeaders: ["Content-Length"],
+    credentials: true,
+  })
+);
+
+app.use("*", async (c, next) => {
+  const requestId = crypto.randomUUID();
+  const reqLogger = logger.child({ requestId });
+  c.set("logger", reqLogger);
+
+  const start = Date.now();
+  await next();
+  const ms = Date.now() - start;
+
+  reqLogger.info(
+    {
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      ms,
+    },
+    "request handled"
+  );
+});
 
 app.get("/health", (c) => c.json({ status: "ok", service: "api-service" }));
 
@@ -41,11 +86,14 @@ app.route("/incidents", incidentsRouter);
 app.route("/approvals", approvalsRouter);
 app.route("/runbooks", runbooksRouter);
 app.route("/stream", streamRouter);
+app.route("/organizations", organizationsRouter);
+
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
 app.onError((err, c) => {
-  logger.error({ err, path: c.req.path }, "unhandled error");
+  const reqLogger = c.get("logger") || logger;
+  reqLogger.error({ err, path: c.req.path }, "unhandled error");
   return c.json({ error: "Internal server error" }, 500);
 });
 

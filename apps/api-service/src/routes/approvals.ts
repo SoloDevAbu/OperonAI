@@ -9,11 +9,20 @@ import {
 } from "@operonai/db";
 import { investigationQueue } from "../lib/queue";
 import { publish } from "../lib/sse";
-import { createLogger } from "@operonai/lib";
+import type { Logger } from "@operonai/lib";
+import {
+  JOB_PREFIX_INCIDENT,
+  SSE_CHANNEL_APPROVALS,
+  APPROVAL_STATUS,
+} from "@operonai/lib";
 
-const logger = createLogger({ service: "api-service:approvals" });
+export const approvalsRouter = new Hono<{
+  Variables: { orgId: string; logger: Logger };
+}>();
 
-export const approvalsRouter = new Hono<{ Variables: { orgId: string } }>();
+const idParamSchema = z.object({
+  id: z.string().uuid("Invalid ID format"),
+});
 
 approvalsRouter.get("/pending", async (c) => {
   const orgId = c.get("orgId") as string;
@@ -23,46 +32,66 @@ approvalsRouter.get("/pending", async (c) => {
   return c.json({ approvals: pending });
 });
 
-approvalsRouter.post("/:id/approve", async (c) => {
-  const orgId = c.get("orgId") as string;
-  const id = c.req.param("id");
+approvalsRouter.post(
+  "/:id/approve",
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const logger = c.get("logger") as Logger | undefined;
+    const orgId = c.get("orgId") as string;
+    const { id } = c.req.valid("param");
 
-  const approval = await findPendingApprovalById(db, id, orgId);
+    const approval = await findPendingApprovalById(db, id, orgId);
 
-  if (!approval) {
-    return c.json(
-      { error: "Approval request not found or already resolved" },
-      404
+    if (!approval) {
+      logger?.warn(
+        { approvalId: id, orgId },
+        "approval request not found or already resolved"
+      );
+      return c.json(
+        { error: "Approval request not found or already resolved" },
+        404
+      );
+    }
+
+    if (new Date() > approval.expiresAt) {
+      await updateApprovalStatus(db, id, APPROVAL_STATUS.TIMED_OUT);
+
+      logger?.warn({ approvalId: id }, "approval request timed out");
+      return c.json({ error: "Approval request has expired" }, 410);
+    }
+
+    await updateApprovalStatus(db, id, APPROVAL_STATUS.APPROVED);
+
+    // Promote the delayed BullMQ job immediately
+    // The agent re-enqueued itself as a delayed job when it hit this approval gate.
+    // Job ID convention: "incident-{incidentId}" — see agent-service approval gate.
+    await promoteAgentJob(
+      approval.incidentId,
+      id,
+      APPROVAL_STATUS.APPROVED,
+      logger
     );
+
+    // SSE — notify dashboard
+    publish(
+      `${SSE_CHANNEL_APPROVALS}:${orgId}`,
+      "approval_resolved",
+      {
+        approvalId: id,
+        incidentId: approval.incidentId,
+        status: APPROVAL_STATUS.APPROVED,
+      },
+      logger
+    );
+
+    logger?.info(
+      { approvalId: id, incidentId: approval.incidentId },
+      "approval granted"
+    );
+
+    return c.json({ success: true, status: "approved" });
   }
-
-  if (new Date() > approval.expiresAt) {
-    await updateApprovalStatus(db, id, "timed_out");
-
-    return c.json({ error: "Approval request has expired" }, 410);
-  }
-
-  await updateApprovalStatus(db, id, "approved");
-
-  // Promote the delayed BullMQ job immediately
-  // The agent re-enqueued itself as a delayed job when it hit this approval gate.
-  // Job ID convention: "incident-{incidentId}" — see agent-service approval gate.
-  await promoteAgentJob(approval.incidentId, id, "approved");
-
-  // SSE — notify dashboard
-  publish(`approvals:${orgId}`, "approval_resolved", {
-    approvalId: id,
-    incidentId: approval.incidentId,
-    status: "approved",
-  });
-
-  logger.info(
-    { approvalId: id, incidentId: approval.incidentId },
-    "approval granted"
-  );
-
-  return c.json({ success: true, status: "approved" });
-});
+);
 
 const rejectSchema = z.object({
   reason: z.string().min(1, "Rejection reason is required"),
@@ -70,34 +99,51 @@ const rejectSchema = z.object({
 
 approvalsRouter.post(
   "/:id/reject",
+  zValidator("param", idParamSchema),
   zValidator("json", rejectSchema),
   async (c) => {
+    const logger = c.get("logger") as Logger | undefined;
     const orgId = c.get("orgId") as string;
-    const id = c.req.param("id");
+    const { id } = c.req.valid("param");
     const { reason } = c.req.valid("json");
 
     const approval = await findPendingApprovalById(db, id, orgId);
 
     if (!approval) {
+      logger?.warn(
+        { approvalId: id, orgId },
+        "approval request not found or already resolved on reject"
+      );
       return c.json(
         { error: "Approval request not found or already resolved" },
         404
       );
     }
 
-    await updateApprovalStatus(db, id, "rejected", { rejectionReason: reason });
-
-    // Resume agent — it will see status=rejected and skip the action
-    await promoteAgentJob(approval.incidentId, id, "rejected");
-
-    publish(`approvals:${orgId}`, "approval_resolved", {
-      approvalId: id,
-      incidentId: approval.incidentId,
-      status: "rejected",
-      reason,
+    await updateApprovalStatus(db, id, APPROVAL_STATUS.REJECTED, {
+      rejectionReason: reason,
     });
 
-    logger.info(
+    await promoteAgentJob(
+      approval.incidentId,
+      id,
+      APPROVAL_STATUS.REJECTED,
+      logger
+    );
+
+    publish(
+      `${SSE_CHANNEL_APPROVALS}:${orgId}`,
+      "approval_resolved",
+      {
+        approvalId: id,
+        incidentId: approval.incidentId,
+        status: APPROVAL_STATUS.REJECTED,
+        reason,
+      },
+      logger
+    );
+
+    logger?.info(
       { approvalId: id, incidentId: approval.incidentId, reason },
       "approval rejected"
     );
@@ -109,15 +155,16 @@ approvalsRouter.post(
 const promoteAgentJob = async (
   incidentId: string,
   approvalId: string,
-  decision: "approved" | "rejected"
+  decision: string,
+  logger?: Logger
 ): Promise<void> => {
   try {
     // Job was enqueued by agent with id: "incident-{incidentId}"
-    const jobId = `incident-${incidentId}`;
+    const jobId = `${JOB_PREFIX_INCIDENT}${incidentId}`;
     const job = await investigationQueue.getJob(jobId);
 
     if (!job) {
-      logger.warn(
+      logger?.warn(
         { jobId, approvalId },
         "agent job not found for approval resume — may have already run"
       );
@@ -133,13 +180,12 @@ const promoteAgentJob = async (
     // Promote from delayed to active immediately
     await job.promote();
 
-    logger.info(
+    logger?.info(
       { jobId, decision },
       "agent job promoted after approval decision"
     );
   } catch (err) {
-    // Log but don't fail the approval — the delayed job will fire on its own eventually
-    logger.error(
+    logger?.error(
       { err, incidentId, approvalId },
       "failed to promote agent job"
     );

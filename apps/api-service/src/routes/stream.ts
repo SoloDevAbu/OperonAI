@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { createSSEStream } from "../lib/sse";
 
-export const streamRouter = new Hono<{ Variables: { orgId: string } }>();
+import type { Logger } from "@operonai/lib";
+
+export const streamRouter = new Hono<{ Variables: { orgId: string; logger: Logger } }>();
 
 // SSE stream — dashboard subscribes to get live incident updates
 
