@@ -1,44 +1,84 @@
 import { Context } from "hono";
+import { createRedisClient } from "@operonai/lib";
+import type { Logger } from "@operonai/lib";
 
 type Writer = (data: string) => void;
 
 const connections = new Map<string, Set<Writer>>();
 
-const register = (channel: string, writer: Writer): void => {
+const pubClient = createRedisClient();
+const subClient = createRedisClient();
+
+subClient.on("message", (channel, message) => {
+  const writers = connections.get(channel);
+  if (!writers || writers.size === 0) return;
+
+  // The message is expected to be a JSON string of { event, data }
+  try {
+    const parsed = JSON.parse(message);
+    const payload = `event: ${parsed.event}\ndata: ${JSON.stringify(parsed.data)}\n\n`;
+
+    for (const write of writers) {
+      try {
+        write(payload);
+      } catch (error) {
+        // Automatically cleanup broken writers
+        writers.delete(write);
+      }
+    }
+  } catch (error) {
+    // Ignore invalid messages
+  }
+});
+
+const register = (channel: string, writer: Writer, logger?: Logger): void => {
   if (!connections.has(channel)) {
     connections.set(channel, new Set());
+    subClient.subscribe(channel).catch((err) => {
+      logger?.error({ err, channel }, "Failed to subscribe to Redis channel");
+    });
   }
 
   connections.get(channel)!.add(writer);
+  logger?.debug(
+    { channel, activeConnections: connections.get(channel)?.size },
+    "SSE client connected"
+  );
 };
 
-const unregister = (channel: string, writer: Writer): void => {
-  connections.get(channel)?.delete(writer);
-  if (connections.get(channel)?.size === 0) {
-    connections.delete(channel);
+const unregister = (channel: string, writer: Writer, logger?: Logger): void => {
+  const writers = connections.get(channel);
+  if (writers) {
+    writers.delete(writer);
+    logger?.debug(
+      { channel, activeConnections: writers.size },
+      "SSE client disconnected"
+    );
+    if (writers.size === 0) {
+      connections.delete(channel);
+      subClient.unsubscribe(channel).catch(() => {});
+    }
   }
 };
 
 export const publish = (
   channel: string,
   event: string,
-  data: unknown
+  data: unknown,
+  logger?: Logger
 ): void => {
-  const writer = connections.get(channel);
-
-  if (!writer || writer.size === 0) return;
-
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-
-  for (const write of writer) {
-    try {
-      write(payload);
-    } catch (error) {}
-  }
+  const message = JSON.stringify({ event, data });
+  pubClient.publish(channel, message).catch((err) => {
+    logger?.error(
+      { err, channel, event },
+      "Failed to publish SSE event to Redis"
+    );
+  });
 };
 
 export const createSSEStream = (c: Context, channel: string): Response => {
   let write: Writer;
+  const logger = c.get("logger") as Logger | undefined;
 
   const stream = new ReadableStream({
     start(controller) {
@@ -46,17 +86,16 @@ export const createSSEStream = (c: Context, channel: string): Response => {
         controller.enqueue(new TextEncoder().encode(data));
       };
 
-      register(channel, write);
+      register(channel, write, logger);
 
-      //send initial connection
       controller.enqueue(
         new TextEncoder().encode(
-          `event: connceted\ndata: {"channel":${channel}}\n\n`
+          `event: connected\ndata: {"channel":"${channel}"}\n\n`
         )
       );
     },
     cancel() {
-      unregister(channel, write);
+      unregister(channel, write, logger);
     },
   });
 
