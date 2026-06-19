@@ -1,0 +1,13 @@
+[project]
+name = "anomaly_service"
+version = "0.1.0"
+description = "Anomaly Detection Service for Operon AI"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.136.3",
+    "httpx>=0.28.1",
+    "numpy>=2.4.6",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "uvicorn[standard]>=0.48.0",
+]
