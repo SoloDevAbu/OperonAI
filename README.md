@@ -439,20 +439,20 @@ erDiagram
 Incidents follow a strictly enforced state machine tracked by `WorkflowState`.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Detected : anomaly confirmed
-    Detected --> Queued : incident created, job enqueued
-    Queued --> Investigating : job picked up
-    Investigating --> AwaitingApproval : destructive action needed
-    AwaitingApproval --> Investigating : approved or rejected, job resumed
-    Investigating --> Concluded : RCA generated
-    Concluded --> Executing : actions to run
-    Executing --> AwaitingApproval : action needs sign-off
-    Executing --> Documented : actions complete
-    Concluded --> Documented : no actions needed
-    Investigating --> Escalated : max steps, no conclusion
-    Documented --> [*]
-    Escalated --> [*]
+flowchart TD
+    START((Start)) -->|Anomaly confirmed| DET([Detected])
+    DET -->|Incident created & job enqueued| QUE([Queued])
+    QUE -->|Job picked up by worker| INV([Investigating])
+    INV -->|Destructive action needed| APP([Awaiting Approval])
+    APP -->|Approved or rejected - job resumed| INV
+    INV -->|RCA & remediation generated| CON([Concluded])
+    CON -->|Actions to run| EXE([Executing])
+    EXE -->|Action needs sign-off| APP
+    EXE -->|Actions complete| DOC([Documented])
+    CON -->|No actions needed| DOC
+    INV -->|Max steps - no conclusion| ESC([Escalated])
+    DOC --> END_DOC((End))
+    ESC --> END_ESC((End))
 ```
 
 ---
@@ -461,78 +461,27 @@ stateDiagram-v2
 All tools conform to a strict TypeScript contract (`BaseTool`) with explicit **Zod validation schemas** and safety flags.
 
 ```mermaid
-classDiagram
-    class BaseTool {
-        +string name
-        +string description
-        +ZodSchema inputSchema
-        +ZodSchema outputSchema
-        +boolean requiresApproval
-        +execute(input, context) Promise~Result~
-    }
+flowchart TB
+    subgraph Contract["BaseTool Contract"]
+        BT["BaseTool Interface<br>---<br>+name: string<br>+description: string<br>+inputSchema: ZodSchema<br>+outputSchema: ZodSchema<br>+requiresApproval: boolean<br>+execute(input, context): Promise"]
+    end
 
-    class FetchRecentLogs {
-        +name: fetch_recent_logs
-        +requiresApproval: false
-        +input: service, timeRangeMs, level, limit
-        +output: LogEntry[]
-    }
+    subgraph Safe["Safe Diagnostic Tools (requiresApproval: false)"]
+        T1["fetch_recent_logs<br>Input: service, timeRangeMs, level, limit<br>Output: LogEntry[]"]
+        T2["get_slow_queries<br>Input: thresholdMs, limit, timeRangeMs<br>Output: SlowQuery[]"]
+        T3["get_queue_stats<br>Input: queueName<br>Output: active, waiting, failed, delayed"]
+        T4["check_redis_health<br>Output: connected, memoryUsage, clients"]
+        T5["get_connection_pool_stats<br>Output: total, idle, waiting, max"]
+        T6["get_deployment_history<br>Input: service, limit<br>Output: Deployment[]"]
+    end
 
-    class GetSlowQueries {
-        +name: get_slow_queries
-        +requiresApproval: false
-        +input: thresholdMs, limit, timeRangeMs
-        +output: SlowQuery[]
-    }
+    subgraph Destructive["Destructive Remediation Tools (requiresApproval: true)"]
+        D1["restart_worker<br>Input: workerName, reason<br>Output: success, pid"]
+        D2["clear_failed_jobs<br>Input: queueName, limit<br>Output: clearedCount"]
+    end
 
-    class GetQueueStats {
-        +name: get_queue_stats
-        +requiresApproval: false
-        +input: queueName
-        +output: active, waiting, failed, delayed
-    }
-
-    class CheckRedisHealth {
-        +name: check_redis_health
-        +requiresApproval: false
-        +output: connected, memoryUsage, connectedClients
-    }
-
-    class GetConnectionPoolStats {
-        +name: get_connection_pool_stats
-        +requiresApproval: false
-        +output: total, idle, waiting, max
-    }
-
-    class GetDeploymentHistory {
-        +name: get_deployment_history
-        +requiresApproval: false
-        +input: service, limit
-        +output: Deployment[]
-    }
-
-    class RestartWorker {
-        +name: restart_worker
-        +requiresApproval: true
-        +input: workerName, reason
-        +output: success, pid
-    }
-
-    class ClearFailedJobs {
-        +name: clear_failed_jobs
-        +requiresApproval: true
-        +input: queueName, limit
-        +output: clearedCount
-    }
-
-    BaseTool <|-- FetchRecentLogs
-    BaseTool <|-- GetSlowQueries
-    BaseTool <|-- GetQueueStats
-    BaseTool <|-- CheckRedisHealth
-    BaseTool <|-- GetConnectionPoolStats
-    BaseTool <|-- GetDeploymentHistory
-    BaseTool <|-- RestartWorker
-    BaseTool <|-- ClearFailedJobs
+    Contract --> Safe
+    Contract --> Destructive
 ```
 
 #### Tool Categorization
@@ -555,14 +504,14 @@ sequenceDiagram
     participant H as Human
 
     IS->>AS: POST /analyze (batch RawEvents)
-    AS->>AS: Score events
+    Note over AS: Score events (Rule Engine + ML)
     AS->>API: POST /internal/incidents
     API->>DB: Create Incident + WorkflowState
     API->>Q: Enqueue investigation job
     Q->>AGT: Dequeue job
     AGT->>DB: Load incident + existing steps
     AGT->>DB: pgvector similarity search
-    AGT->>AGT: Run investigation loop
+    Note over AGT: Run investigation loop (Claude AI)
     AGT->>DB: Write InvestigationStep after each tool
     AGT->>API: POST /internal/approvals (if needed)
     API->>DB: Create ApprovalRequest
@@ -572,7 +521,7 @@ sequenceDiagram
     API->>Q: Promote delayed job to active
     Q->>AGT: Job resumed
     AGT->>DB: Load incident + steps + approval decision
-    AGT->>AGT: Continue loop, execute action
+    Note over AGT: Continue loop & execute action
     AGT->>DB: Write RCA, update Incident
     AGT->>DB: Write IncidentMemory embedding
 ```
@@ -594,7 +543,7 @@ sequenceDiagram
     IL->>AG: requestApproval(action, payload)
     AG->>DB: Create ApprovalRequest status=pending
     AG->>DB: Update Incident status=awaiting_approval
-    AG->>Q: Re-enqueue job delayed 30s poll interval, jobId=incident-{id}
+    AG->>Q: Re-enqueue job delayed 30s poll interval
     AG->>IL: return - exit cleanly
 
     loop Every 30s until resolved or timeout
@@ -611,7 +560,7 @@ sequenceDiagram
     Q->>IL: Job fires
     IL->>DB: Check ApprovalRequest status
     DB->>IL: approved
-    IL->>IL: Execute action, continue loop
+    Note over IL: Execute action & continue loop
 ```
 
 1. When Claude invokes a tool with `requiresApproval: true`, the `ApprovalGate` creates an `ApprovalRequest` (`status: pending`) and updates `Incident` to `AwaitingApproval`.
@@ -628,23 +577,26 @@ Because every step of Claude's reasoning and tool output is written immediately 
 sequenceDiagram
     participant Q as BullMQ
     participant IL as Investigation Loop
+    participant TL as Tool Layer
     participant DB as PostgreSQL
 
     Q->>IL: Start job
     IL->>DB: Load incident
-    IL->>DB: Load existing InvestigationSteps - empty first run
-    IL->>IL: Run tool 1
+    IL->>DB: Load existing InvestigationSteps (empty first run)
+    IL->>TL: Execute Tool 1
+    TL-->>IL: Return Tool 1 Output
     IL->>DB: Write Step 1
-    IL->>IL: Run tool 2
+    IL->>TL: Execute Tool 2
+    TL-->>IL: Return Tool 2 Output
     IL->>DB: Write Step 2
-    note over IL: CRASH - process dies
+    Note over IL: CRASH - Process dies unexpectedly
 
-    Q->>Q: Retry after exponential backoff
+    Note over Q: Exponential backoff delay & retry
     Q->>IL: Restart job
     IL->>DB: Load incident
-    IL->>DB: Load existing InvestigationSteps - Step 1 and Step 2
-    IL->>IL: Reconstruct context from existing steps
-    IL->>IL: Continue from Step 3
+    IL->>DB: Load existing InvestigationSteps (Step 1 and Step 2)
+    Note over IL: Reconstruct context from existing steps
+    Note over IL: Continue cleanly from Step 3
 ```
 
 When BullMQ automatically retries the crashed job after exponential backoff, `agent-service` reloads the completed steps from PostgreSQL, hydrates Claude's conversation history (`Vercel AI SDK context`), and resumes precisely at Step 3 without repeating diagnostic steps or incurring redundant LLM token charges.
