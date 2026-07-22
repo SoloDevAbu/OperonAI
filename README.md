@@ -134,6 +134,7 @@ flowchart TB
 ```
 
 ### Architectural Flow Summary
+
 1. **Telemetry Capture**: `ingestion-service` receives real-time log webhooks and continuously polls internal databases/queues. Events are normalized into a unified schema and buffered in memory.
 2. **Signal Evaluation**: Batched events are sent to `anomaly-service` where deterministic rules (error rates, pool exhaustion) and statistical ML algorithms (Z-scores, rolling windows) compute an anomaly score.
 3. **Incident Creation**: Confirmed anomalies trigger `api-service` to create an `Incident` record in PostgreSQL and enqueue an investigation job in BullMQ (`Redis`).
@@ -144,25 +145,26 @@ flowchart TB
 
 ## 2. Technology Stack & Architectural Justification
 
-| Layer | Choice | Architectural Justification |
-| :--- | :--- | :--- |
-| **Monorepo Management** | **Turborepo + pnpm workspaces** | Industry standard for polyglot monorepos. Provides zero-copy symlinked dependency management, deterministic builds, and robust artifact caching across Node.js services and shared packages. |
-| **Ingestion Hot Path** | **Node.js + Fastify** | Fastify offers industry-leading throughput (`~30k+ req/sec`) with JSON schema validation, ideal for buffering and normalizing high-volume log webhooks without blocking the event loop. |
-| **Signal & ML Processing** | **Python + FastAPI** | Native integration with `numpy`, `pandas`, and `scikit-learn` for Z-score calculations, rate-of-change analysis, and statistical window processing. |
-| **AI Investigation Loop** | **Node.js + Fastify + Vercel AI SDK** | TypeScript-first architecture leveraging the **Vercel AI SDK** for structured tool calling, streaming responses, and seamless integration with **Anthropic Claude**. |
-| **REST API Gateway** | **Node.js + Hono** | Ultra-lightweight, high-performance web framework providing fast route matching and native Server-Sent Events (SSE) support for low-latency frontend pushes. |
-| **Control Plane UI** | **Next.js + TypeScript** | React Server Components, server actions, and dynamic client components for a responsive real-time dashboard, interactive incident timelines, and approval gates. |
-| **Primary & Vector DB** | **PostgreSQL + Drizzle ORM + `pgvector`** | Single source of truth combining relational integrity (`Drizzle ORM`) with high-performance vector similarity searches (`pgvector`) for historical incident and runbook RAG. |
-| **Job Queue & State** | **BullMQ + Redis** | Reliable distributed task execution with exponential backoff, delayed jobs, step pausing/resuming, and concurrency controls across multi-node worker pools. |
-| **AI & LLM Engine** | **Anthropic Claude** | State-of-the-art reasoning and tool-calling capabilities essential for multi-step diagnostic investigations and root cause analysis (RCA). |
-| **Observability** | **Langfuse** | Deep tracing of agent reasoning loops, token usage, tool latency, and prompt performance across multi-step investigations. |
-| **Containers & Reverse Proxy** | **Docker + Nginx** | Service isolation ensuring zero-conflict deployment between Node and Python runtimes, unified behind Nginx as a single entry point (`Port 80`). |
+| Layer                          | Choice                                    | Architectural Justification                                                                                                                                                                  |
+| :----------------------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Monorepo Management**        | **Turborepo + pnpm workspaces**           | Industry standard for polyglot monorepos. Provides zero-copy symlinked dependency management, deterministic builds, and robust artifact caching across Node.js services and shared packages. |
+| **Ingestion Hot Path**         | **Node.js + Fastify**                     | Fastify offers industry-leading throughput (`~30k+ req/sec`) with JSON schema validation, ideal for buffering and normalizing high-volume log webhooks without blocking the event loop.      |
+| **Signal & ML Processing**     | **Python + FastAPI**                      | Native integration with `numpy`, `pandas`, and `scikit-learn` for Z-score calculations, rate-of-change analysis, and statistical window processing.                                          |
+| **AI Investigation Loop**      | **Node.js + Fastify + Vercel AI SDK**     | TypeScript-first architecture leveraging the **Vercel AI SDK** for structured tool calling, streaming responses, and seamless integration with **Anthropic Claude**.                         |
+| **REST API Gateway**           | **Node.js + Hono**                        | Ultra-lightweight, high-performance web framework providing fast route matching and native Server-Sent Events (SSE) support for low-latency frontend pushes.                                 |
+| **Control Plane UI**           | **Next.js + TypeScript**                  | React Server Components, server actions, and dynamic client components for a responsive real-time dashboard, interactive incident timelines, and approval gates.                             |
+| **Primary & Vector DB**        | **PostgreSQL + Drizzle ORM + `pgvector`** | Single source of truth combining relational integrity (`Drizzle ORM`) with high-performance vector similarity searches (`pgvector`) for historical incident and runbook RAG.                 |
+| **Job Queue & State**          | **BullMQ + Redis**                        | Reliable distributed task execution with exponential backoff, delayed jobs, step pausing/resuming, and concurrency controls across multi-node worker pools.                                  |
+| **AI & LLM Engine**            | **Anthropic Claude**                      | State-of-the-art reasoning and tool-calling capabilities essential for multi-step diagnostic investigations and root cause analysis (RCA).                                                   |
+| **Observability**              | **Langfuse**                              | Deep tracing of agent reasoning loops, token usage, tool latency, and prompt performance across multi-step investigations.                                                                   |
+| **Containers & Reverse Proxy** | **Docker + Nginx**                        | Service isolation ensuring zero-conflict deployment between Node and Python runtimes, unified behind Nginx as a single entry point (`Port 80`).                                              |
 
 ---
 
 ## 3. Microservices Breakdown
 
 ### 3.1 `ingestion-service` (Node.js + Fastify)
+
 The hot-path entry point responsible for gathering telemetry from disparate systems without dropping packets or overloading downstream analyzers.
 
 ```mermaid
@@ -202,14 +204,15 @@ flowchart TD
     B2 --> F2
 ```
 
-* **Webhook Receivers**: High-speed endpoints accepting application logs and external event payloads.
-* **Pollers**: Cron-driven jobs pulling state (`30s` for Postgres slow queries/connections, `15s` for BullMQ queue depths/failed counts).
-* **Normalizer**: Standardizes disparate incoming payloads into the canonical `RawEvent` schema (`source`, `sourceType`, `normalizedType`, `payload`, `metadata`).
-* **Batch Buffer**: Accumulates events in memory (`flushing every 2 seconds OR at 100 items`) to optimize database inserts and minimize HTTP overhead when communicating with the `anomaly-service`.
+- **Webhook Receivers**: High-speed endpoints accepting application logs and external event payloads.
+- **Pollers**: Cron-driven jobs pulling state (`30s` for Postgres slow queries/connections, `15s` for BullMQ queue depths/failed counts).
+- **Normalizer**: Standardizes disparate incoming payloads into the canonical `RawEvent` schema (`source`, `sourceType`, `normalizedType`, `payload`, `metadata`).
+- **Batch Buffer**: Accumulates events in memory (`flushing every 2 seconds OR at 100 items`) to optimize database inserts and minimize HTTP overhead when communicating with the `anomaly-service`.
 
 ---
 
 ### 3.2 `anomaly-service` (Python + FastAPI)
+
 The quantitative analysis brain that evaluates batched telemetry to filter noise and identify genuine incidents.
 
 ```mermaid
@@ -247,16 +250,17 @@ flowchart TD
     D3 -->|no| O2[Discard]
 ```
 
-* **Rule Engine**: Deterministic checks enforcing operational boundaries (`error_rate > threshold`, `queue_depth > max`, `connection_pool_waiting > 0`, `worker_crash_count >= 3`).
-* **ML Processor**: Statistical anomaly detection operating on rolling telemetry windows:
-  * **Z-Score Detection**: Identifies spikes outside standard deviations.
-  * **Rate-of-Change Detection**: Flags sudden velocity shifts (e.g., memory leak acceleration).
-  * **Rolling Window Stats**: Tracks multi-minute baseline trends.
-* **Decider**: Aggregates scores from both engines. If the composite `anomalyScore` exceeds the severity matrix threshold, it triggers `POST /internal/incidents` on `api-service` to initiate an automated investigation.
+- **Rule Engine**: Deterministic checks enforcing operational boundaries (`error_rate > threshold`, `queue_depth > max`, `connection_pool_waiting > 0`, `worker_crash_count >= 3`).
+- **ML Processor**: Statistical anomaly detection operating on rolling telemetry windows:
+  - **Z-Score Detection**: Identifies spikes outside standard deviations.
+  - **Rate-of-Change Detection**: Flags sudden velocity shifts (e.g., memory leak acceleration).
+  - **Rolling Window Stats**: Tracks multi-minute baseline trends.
+- **Decider**: Aggregates scores from both engines. If the composite `anomalyScore` exceeds the severity matrix threshold, it triggers `POST /internal/incidents` on `api-service` to initiate an automated investigation.
 
 ---
 
 ### 3.3 `agent-service` (Node.js + Fastify + BullMQ + Claude)
+
 The core autonomous AI engine. It executes multi-step investigation loops, interacts with live infrastructure via safe/destructive tools, leverages RAG memory, and enforces safety gates.
 
 ```mermaid
@@ -303,35 +307,38 @@ flowchart TD
     Z --> AA[End Langfuse trace]
 ```
 
-* **Investigation Loop**: Powered by the **Vercel AI SDK** and **Anthropic Claude**. The agent evaluates context, executes diagnostic tools iteratively, and decides whether more context is required, a root cause has been found, or human escalation is needed.
-* **Memory & RAG Layer**: Before reasoning, the agent queries `pgvector` (`cosine similarity`) to fetch:
+- **Investigation Loop**: Powered by the **Vercel AI SDK** and **Anthropic Claude**. The agent evaluates context, executes diagnostic tools iteratively, and decides whether more context is required, a root cause has been found, or human escalation is needed.
+- **Memory & RAG Layer**: Before reasoning, the agent queries `pgvector` (`cosine similarity`) to fetch:
   1. Similar historical `IncidentMemory` summaries and root causes.
   2. Standard operating `Runbook` procedures matching the affected service or error pattern.
-* **Langfuse Tracing**: Every step, tool selection, token expenditure, and latency metric is emitted to Langfuse for full end-to-end observability and auditing.
+- **Langfuse Tracing**: Every step, tool selection, token expenditure, and latency metric is emitted to Langfuse for full end-to-end observability and auditing.
 
 ---
 
 ### 3.4 `api-service` (Node.js + Hono)
+
 The central data gateway connecting backend services to the web interface.
 
-* **Lightweight REST Router**: Exposes clean CRUD endpoints for incidents, investigation steps, timelines, runbooks, and pending approvals.
-* **Server-Sent Events (SSE)**: Maintains persistent HTTP connections (`/stream/incidents`, `/stream/approvals`) with the Next.js frontend, broadcasting state changes instantly without polling.
-* **Internal Security**: Protects `/internal/*` routes (`POST /internal/incidents`, `POST /internal/approvals`) so only authenticated internal microservices (`anomaly-service`, `agent-service`) can trigger workflow transitions.
+- **Lightweight REST Router**: Exposes clean CRUD endpoints for incidents, investigation steps, timelines, runbooks, and pending approvals.
+- **Server-Sent Events (SSE)**: Maintains persistent HTTP connections (`/stream/incidents`, `/stream/approvals`) with the Next.js frontend, broadcasting state changes instantly without polling.
+- **Internal Security**: Protects `/internal/*` routes (`POST /internal/incidents`, `POST /internal/approvals`) so only authenticated internal microservices (`anomaly-service`, `agent-service`) can trigger workflow transitions.
 
 ---
 
 ### 3.5 `web` (Next.js + TypeScript)
+
 The operator control plane built with Next.js 14+ App Router.
 
-* **Live Incident Feed (`LiveFeed.tsx`)**: Real-time ticker driven by SSE streams (`SSE /stream/incidents`), displaying active anomalies by severity (`Critical`, `High`, `Medium`, `Low`).
-* **Interactive Timeline (`AgentTimeline.tsx`)**: Visualizes the AI agent’s step-by-step investigation journey, including tool execution inputs/outputs, token costs, latency, and Claude's exact reasoning transcripts.
-* **Human Sign-Off Control (`ApprovalModal.tsx`)**: Renders pending destructive actions (`Action Description`, `Payload`, `Reasoning`), allowing engineers to approve or reject with write-in feedback right from the browser.
+- **Live Incident Feed (`LiveFeed.tsx`)**: Real-time ticker driven by SSE streams (`SSE /stream/incidents`), displaying active anomalies by severity (`Critical`, `High`, `Medium`, `Low`).
+- **Interactive Timeline (`AgentTimeline.tsx`)**: Visualizes the AI agent’s step-by-step investigation journey, including tool execution inputs/outputs, token costs, latency, and Claude's exact reasoning transcripts.
+- **Human Sign-Off Control (`ApprovalModal.tsx`)**: Renders pending destructive actions (`Action Description`, `Payload`, `Reasoning`), allowing engineers to approve or reject with write-in feedback right from the browser.
 
 ---
 
 ## 4. Low-Level Design (LLD) & Data Architecture
 
 ### 4.1 Relational & Vector Data Model (ER Diagram)
+
 The database schema managed by **Drizzle ORM** combines relational tables with **pgvector** embedding columns (`vector(1536)`).
 
 ```mermaid
@@ -426,16 +433,18 @@ erDiagram
 ```
 
 #### Entity Definitions
-* **`RawEvent`**: Immutable telemetry audit log with pre-computed anomaly scores.
-* **`Incident`**: The central case file tracking status (`Detected`, `Queued`, `Investigating`, `AwaitingApproval`, `Concluded`, `Executing`, `Documented`, `Escalated`), confidence scores, and root causes.
-* **`InvestigationStep`**: Immutable audit ledger of each action taken by Claude during the investigation loop. Enables step-by-step UI playback and robust crash recovery.
-* **`ApprovalRequest`**: Tracks human authorization requests for destructive tool execution (`status: pending | approved | rejected`).
-* **`IncidentMemory` & `Runbook`**: Vector-indexed RAG tables (`vector embedding`) enabling semantic similarity queries during agent initialization.
-* **`WorkflowState`**: Immutable state transition ledger tracking exact timestamps and reasons for every status change.
+
+- **`RawEvent`**: Immutable telemetry audit log with pre-computed anomaly scores.
+- **`Incident`**: The central case file tracking status (`Detected`, `Queued`, `Investigating`, `AwaitingApproval`, `Concluded`, `Executing`, `Documented`, `Escalated`), confidence scores, and root causes.
+- **`InvestigationStep`**: Immutable audit ledger of each action taken by Claude during the investigation loop. Enables step-by-step UI playback and robust crash recovery.
+- **`ApprovalRequest`**: Tracks human authorization requests for destructive tool execution (`status: pending | approved | rejected`).
+- **`IncidentMemory` & `Runbook`**: Vector-indexed RAG tables (`vector embedding`) enabling semantic similarity queries during agent initialization.
+- **`WorkflowState`**: Immutable state transition ledger tracking exact timestamps and reasons for every status change.
 
 ---
 
 ### 4.2 Workflow State Machine
+
 Incidents follow a strictly enforced state machine tracked by `WorkflowState`.
 
 ```mermaid
@@ -458,6 +467,7 @@ flowchart TD
 ---
 
 ### 4.3 Agent Tool Layer Contract
+
 All tools conform to a strict TypeScript contract (`BaseTool`) with explicit **Zod validation schemas** and safety flags.
 
 ```mermaid
@@ -485,12 +495,14 @@ flowchart TB
 ```
 
 #### Tool Categorization
-* **Safe Diagnostic Tools (`requiresApproval: false`)**: Read-only queries executed immediately (`fetch_recent_logs`, `get_slow_queries`, `get_queue_stats`, `check_redis_health`, `get_connection_pool_stats`, `get_deployment_history`).
-* **Destructive Remediation Tools (`requiresApproval: true`)**: State-altering operations requiring explicit operator sign-off (`restart_worker`, `clear_failed_jobs`).
+
+- **Safe Diagnostic Tools (`requiresApproval: false`)**: Read-only queries executed immediately (`fetch_recent_logs`, `get_slow_queries`, `get_queue_stats`, `check_redis_health`, `get_connection_pool_stats`, `get_deployment_history`).
+- **Destructive Remediation Tools (`requiresApproval: true`)**: State-altering operations requiring explicit operator sign-off (`restart_worker`, `clear_failed_jobs`).
 
 ---
 
 ### 4.4 Inter-Service Communication & Lifecycle
+
 The end-to-end journey of an incident from telemetry capture to RAG documentation:
 
 ```mermaid
@@ -529,6 +541,7 @@ sequenceDiagram
 ---
 
 ### 4.5 Human-in-the-Loop Approval Pause / Resume
+
 To prevent worker threads from blocking or holding memory during long human approval cycles, OperonAI leverages **BullMQ delayed jobs** as a non-blocking state machine pause mechanism:
 
 ```mermaid
@@ -571,6 +584,7 @@ sequenceDiagram
 ---
 
 ### 4.6 Agent Crash Recovery & State Persistence
+
 Because every step of Claude's reasoning and tool output is written immediately to `InvestigationStep`, workers can survive process crashes, out-of-memory errors, or node restarts with **zero context loss**:
 
 ```mermaid
@@ -604,6 +618,7 @@ When BullMQ automatically retries the crashed job after exponential backoff, `ag
 ---
 
 ### 4.7 API Service Routes
+
 All routes exposed by `api-service` (`Hono`) mapped across public operator access and protected internal service access:
 
 ```mermaid
@@ -707,29 +722,31 @@ ai-ops-agent/ (OperonAI)
 
 When running locally or via Docker Compose, services are mapped to the following standard ports:
 
-| Service | Port | Description |
-| :--- | :--- | :--- |
-| **Nginx Reverse Proxy** | `80` | Unified gateway routing web traffic and external webhooks to internal services. |
-| **`web` (Next.js)** | `3000` | Operator Dashboard and approval control plane. |
-| **`ingestion-service`** | `3001` | Telemetry intake, webhooks, and polling pipelines. |
-| **`agent-service`** | `3002` | Worker pool health endpoints and internal agent metrics. |
-| **`api-service`** | `3003` | REST API endpoints, internal triggers, and SSE real-time streams. |
-| **`anomaly-service`** | `8000` | Python FastAPI signal processing and ML scoring server. |
-| **PostgreSQL (`pgvector`)** | `5432` | Primary relational database and high-dimensional vector store. |
-| **Redis** | `6379` | BullMQ job queue storage, task state, and distributed locking. |
+| Service                     | Port   | Description                                                                     |
+| :-------------------------- | :----- | :------------------------------------------------------------------------------ |
+| **Nginx Reverse Proxy**     | `80`   | Unified gateway routing web traffic and external webhooks to internal services. |
+| **`web` (Next.js)**         | `3000` | Operator Dashboard and approval control plane.                                  |
+| **`ingestion-service`**     | `3001` | Telemetry intake, webhooks, and polling pipelines.                              |
+| **`agent-service`**         | `3002` | Worker pool health endpoints and internal agent metrics.                        |
+| **`api-service`**           | `3003` | REST API endpoints, internal triggers, and SSE real-time streams.               |
+| **`anomaly-service`**       | `8000` | Python FastAPI signal processing and ML scoring server.                         |
+| **PostgreSQL (`pgvector`)** | `5432` | Primary relational database and high-dimensional vector store.                  |
+| **Redis**                   | `6379` | BullMQ job queue storage, task state, and distributed locking.                  |
 
 ---
 
 ## 7. Getting Started & Local Development
 
 ### Prerequisites
-* **Node.js**: `v20.x` or higher
-* **pnpm**: `v9.x` (`npm install -g pnpm`)
-* **Python**: `3.11+` (for `anomaly-service` local development)
-* **Docker & Docker Compose**: Required for running local PostgreSQL (`pgvector`) and Redis containers.
-* **Anthropic API Key**: Required for Claude reasoning (`ANTHROPIC_API_KEY`).
+
+- **Node.js**: `v20.x` or higher
+- **pnpm**: `v9.x` (`npm install -g pnpm`)
+- **Python**: `3.11+` (for `anomaly-service` local development)
+- **Docker & Docker Compose**: Required for running local PostgreSQL (`pgvector`) and Redis containers.
+- **Anthropic API Key**: Required for Claude reasoning (`ANTHROPIC_API_KEY`).
 
 ### Step 1: Clone & Install Dependencies
+
 ```bash
 git clone https://github.com/SoloDevAbu/OperonAI.git
 cd OperonAI
@@ -739,11 +756,15 @@ pnpm install
 ```
 
 ### Step 2: Environment Configuration
+
 Copy the sample environment file to the root:
+
 ```bash
 cp .env.example .env
 ```
+
 Ensure the following core keys are populated in your `.env` file:
+
 ```env
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/operon_ai
 REDIS_URL=redis://localhost:6379
@@ -754,13 +775,17 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
 ### Step 3: Start Infrastructure Services
+
 Launch PostgreSQL (with `pgvector` pre-configured via `init.sql`) and Redis:
+
 ```bash
 docker-compose -f infrastructure/docker-compose.dev.yml up -d postgres redis
 ```
 
 ### Step 4: Run Database Migrations & Seed RAG Runbooks
+
 Push the Drizzle schema to your local database and seed standard incident runbooks with embeddings:
+
 ```bash
 # Push Drizzle ORM schema to Postgres
 pnpm --filter @operonai/db run db:push
@@ -770,25 +795,26 @@ pnpm run seed:runbooks
 ```
 
 ### Step 5: Launch the Polyglot Monorepo
+
 Use Turborepo to start all Node.js and Python microservices with live reload enabled simultaneously:
+
 ```bash
 pnpm dev
 ```
-* The **Operator Dashboard** will be live at: [http://localhost:3000](http://localhost:3000)
-* The **API Service** docs will be live at: [http://localhost:3003](http://localhost:3003)
+
+- The **Operator Dashboard** will be live at: [http://localhost:3000](http://localhost:3000)
+- The **API Service** docs will be live at: [http://localhost:3003](http://localhost:3003)
 
 ### Step 6: Simulate a Live Anomaly & Investigation
+
 To test the autonomous self-healing loop locally, run the built-in chaos simulation script:
+
 ```bash
 # Triggers a synthetic memory leak & database connection exhaustion event
 pnpm run simulate:incident
 ```
+
 1. Watch the event flow through `ingestion-service` (`3001`) and get scored by `anomaly-service` (`8000`).
 2. Open the **Next.js Dashboard (`http://localhost:3000`)** to see the new incident appear via real-time SSE.
 3. Observe Claude (`agent-service` on `3002`) execute diagnostic tools, query similar past incidents (`pgvector`), and pause at the **Approval Gate** when attempting to restart the affected worker.
 4. Click **Approve** on the dashboard modal to watch Claude resume execution and document the complete **Root Cause Analysis (RCA)**!
-
----
-
-## License
-Proprietary & Confidential — **OperonAI** / SoloDevAbu. All rights reserved.
